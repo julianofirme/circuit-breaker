@@ -116,4 +116,42 @@ class CircuitBreakerWithEmitter implements ICircuitBreakerWithEmitter {
   }
 }
 
+class TestHttp extends Http {
+  constructor() {
+    super('http://localhost:5000/');
+  }
+
+  public test() {
+    return this.instance.get('/test');
+  }
+}
+
+async function main() {
+  const testHttp = new TestHttp();
+
+  const errorHandler = (err: AxiosError) => {
+    console.log(err.message);
+
+    return err?.response?.status === 429;
+  };
+
+  const testCircuitBreaker = new CircuitBreakerWithEmitter(testHttp, {
+    timeout: 10_000,
+    errorHandler,
+  });
+
+  testCircuitBreaker.on('OPEN', () => {
+    console.log('CIRCUIT BREAKER WAS OPENED');
+  });
+
+  testCircuitBreaker.on('CLOSE', async () => {
+    console.log('CIRCUIT BREAKER WAS CLOSED');
+  });
+
+  setInterval(() => {
+    testHttp.test().catch(() => {});
+  }, 2000);
+}
+
+main();
 
