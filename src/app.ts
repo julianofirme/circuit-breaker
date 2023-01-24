@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { ICircuitBreaker, ICircuitBreakerOptions, IHttp } from './types';
 class Http implements IHttp {
   public readonly instance: AxiosInstance
@@ -28,6 +28,12 @@ class CircuitBreaker implements ICircuitBreaker {
 	  this.http = http;
 	  this.timeout = options.timeout;
 	  this.errorHandler = options.errorHandler;
+
+    this.http.instance.interceptors.request.use(this.interceptRequest.bind(this));
+    this.http.instance.interceptors.response.use(
+      (response: AxiosResponse) => response,
+      this.interceptErrorResponse.bind(this),
+    );
 	}
 	
 	public getStatus() {
@@ -50,6 +56,17 @@ class CircuitBreaker implements ICircuitBreaker {
     setTimeout(() => {
       this.isOpen = false;
     }, this.timeout);
+  }
+
+  private interceptRequest(config: any) {
+    const CancelToken = axios.CancelToken;
+  
+    const cancelToken = new CancelToken((cancel) => cancel('Circuit breaker is open'));
+  
+    return {
+      ...config,
+      ...(this.isOpen ? { cancelToken } : {}),
+    };
   }
 }
 
