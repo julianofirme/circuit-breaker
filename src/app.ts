@@ -1,5 +1,5 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios';
-import { ICircuitBreaker, ICircuitBreakerOptions, IHttp } from './types';
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import { CircuitBreakerEvents, ICircuitBreaker, ICircuitBreakerOptions, ICircuitBreakerWithEmitter, IEventEmitter, IHttp } from './types';
 class Http implements IHttp {
   public readonly instance: AxiosInstance
 
@@ -18,33 +18,77 @@ class UsefulService extends Http {
   }
 }
 
-class CircuitBreaker implements ICircuitBreaker {
-	private readonly http: IHttp;
-	private readonly timeout: number;
-	private isOpen = false;
-	private errorHandler: (error: any) => boolean;
-	
-	constructor(http: IHttp, options: ICircuitBreakerOptions) {
-	  this.http = http;
-	  this.timeout = options.timeout;
-	  this.errorHandler = options.errorHandler;
+class EventEmitter implements IEventEmitter {
+  private readonly events: Record<string, Function[]>;
+
+  public constructor() {
+    this.events = {};
+  }
+
+  public on(name: string, listener: Function) {
+    if (!this.events[name]) {
+      this.events[name] = [];
+    }
+
+    this.events[name].push(listener);
+  }
+
+  public removeListener(name: string, listenerToRemove: Function) {
+    if (!this.events[name]) {
+      throw new Error(`Can't remove a listener. Event "${name}" doesn't exits.`);
+    }
+
+    const filterListeners = (listener: Function) => listener !== listenerToRemove;
+
+    this.events[name] = this.events[name].filter(filterListeners);
+  }
+
+  public emit(name: string, data: any) {
+    if (!this.events[name]) {
+      throw new Error(`Can't emit an event. Event "${name}" doesn't exits.`);
+    }
+
+    const fireCallbacks = (callback: Function) => {
+      callback(data);
+    };
+
+    this.events[name].forEach(fireCallbacks);
+  }
+}
+
+class CircuitBreakerWithEmitter implements ICircuitBreakerWithEmitter {
+  private readonly http: IHttp;
+  private readonly timeout: number;
+  private isOpen: boolean = false;
+  private readonly errorHandler: (error: any) => boolean;
+  private readonly eventEmitter: IEventEmitter;
+
+  constructor(http: IHttp, option: ICircuitBreakerOptions) {
+    this.http = http;
+    this.timeout = option.timeout;
+    this.errorHandler = option.errorHandler;
+    this.eventEmitter = new EventEmitter();
 
     this.http.instance.interceptors.request.use(this.interceptRequest.bind(this));
     this.http.instance.interceptors.response.use(
       (response: AxiosResponse) => response,
       this.interceptErrorResponse.bind(this),
     );
-	}
-	
-	public getStatus() {
-	  return this.isOpen;
-	}
+  }
 
-  private interceptRequest(config: any) {
+  public getStatus() {
+    return this.isOpen;
+  }
+
+  public on(event: CircuitBreakerEvents, listener: Function) {
+    this.eventEmitter.on(event, listener);
+  }
+
+  private interceptRequest(config: AxiosRequestConfig) {
     const CancelToken = axios.CancelToken;
-  
+
     const cancelToken = new CancelToken((cancel) => cancel('Circuit breaker is open'));
-  
+
     return {
       ...config,
       ...(this.isOpen ? { cancelToken } : {}),
@@ -53,20 +97,23 @@ class CircuitBreaker implements ICircuitBreaker {
 
   private interceptErrorResponse(error: any) {
     const shouldCircuitBreakerBeOpen = this.errorHandler(error);
-  
+
     if (shouldCircuitBreakerBeOpen && !this.isOpen) {
       this.openCircuitBreaker();
     }
-  
+
     return Promise.reject(error);
   }
-  
+
   private openCircuitBreaker() {
     this.isOpen = true;
-  
+    this.eventEmitter.emit('OPEN');
+
     setTimeout(() => {
       this.isOpen = false;
+      this.eventEmitter.emit('CLOSE');
     }, this.timeout);
   }
 }
+
 
