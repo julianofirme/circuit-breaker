@@ -40,6 +40,17 @@ class CircuitBreaker implements ICircuitBreaker {
 	  return this.isOpen;
 	}
 
+  private interceptRequest(config: any) {
+    const CancelToken = axios.CancelToken;
+  
+    const cancelToken = new CancelToken((cancel) => cancel('Circuit breaker is open'));
+  
+    return {
+      ...config,
+      ...(this.isOpen ? { cancelToken } : {}),
+    };
+  }
+
   private interceptErrorResponse(error: any) {
     const shouldCircuitBreakerBeOpen = this.errorHandler(error);
   
@@ -56,17 +67,6 @@ class CircuitBreaker implements ICircuitBreaker {
     setTimeout(() => {
       this.isOpen = false;
     }, this.timeout);
-  }
-
-  private interceptRequest(config: any) {
-    const CancelToken = axios.CancelToken;
-  
-    const cancelToken = new CancelToken((cancel) => cancel('Circuit breaker is open'));
-  
-    return {
-      ...config,
-      ...(this.isOpen ? { cancelToken } : {}),
-    };
   }
 }
 
